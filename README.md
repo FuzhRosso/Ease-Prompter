@@ -3,7 +3,8 @@
 <p>Useful for simulate running text like news anchor</p>
 <p>Just install exe file or run py file by terminal</p>
 <p></p>
-<p>Latest Version: 1.0 (SHA-256: 1DF9E8E4CE72F2571BAC25910886F3302A57F4D49399197AB99671381A542EB4)</p>
+<p>Latest Version: 1.0</p> 
+<p>(SHA-256: 1DF9E8E4CE72F2571BAC25910886F3302A57F4D49399197AB99671381A542EB4)</p>
 
 
 
