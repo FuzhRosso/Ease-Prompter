@@ -1,5 +1,5 @@
 
-<p>This program running on python</p>
+<p>This program is python desktop application</p>
 <p>Useful for simulate running text like news anchor</p>
 <p>Just install exe file or run py file by terminal</p>
 <p></p>
