@@ -1,0 +1,368 @@
+import sys
+import os
+import json
+import tkinter as tk
+from tkinter import ttk, colorchooser, messagebox, simpledialog, filedialog
+
+def resource_path(relative_path):
+    """ Mendapatkan path absolut ke resource, kompatibel dengan PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+class EasePrompterApp:
+    def __init__(self, root):
+        self.root = root
+        # --- PERUBAHAN NAMA APLIKASI DI SINI ---
+        self.root.title("Ease Prompter")
+        self.root.geometry("1000x700")
+        
+        # --- Pengaturan Ikon Window & Taskbar ---
+        icon_path = resource_path("app_icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.root.iconbitmap(icon_path)
+            except Exception:
+                pass
+        
+        # --- Pengaturan Default ---
+        self.is_playing = False
+        self.is_fullscreen = False
+        self.scroll_speed = 30
+        self.font_size = 36
+        self.text_color = "white"
+        self.bg_color = "black"
+        self.margin_x = 100
+        self.margin_y = 50
+        
+        # --- Sistem Konfigurasi Aman (AppData) ---
+        appdata_dir = os.getenv('APPDATA')
+        if appdata_dir:
+            # Mengubah nama folder penyimpanan memori ke EasePrompter
+            self.config_dir = os.path.join(appdata_dir, "EasePrompter")
+            os.makedirs(self.config_dir, exist_ok=True)
+            self.config_file = os.path.join(self.config_dir, "config_prompter.json")
+        else:
+            self.config_file = "config_prompter.json"
+            
+        self.last_folder = ""
+        self.last_script = ""
+        
+        # Database Skrip Default
+        self.scripts = {
+            "Panduan Penggunaan": {
+                "content": "Ini adalah teks panduan Ease Prompter.\n\nKlik tombol 'Muat Folder' untuk memilih folder (library) di komputermu yang berisi file-file .txt.\n\nSemua file .txt di dalam folder tersebut akan otomatis dimuat ke dalam daftar skrip ini.\n\nSelamat berlatih!" + ("\n\n(Teks tambahan untuk efek gulir...)" * 15)
+            }
+        }
+
+        # Muat konfigurasi memori & Folder
+        self.load_config()
+        if self.last_folder and os.path.exists(self.last_folder):
+            self.load_folder_to_memory(self.last_folder)
+            
+        self.setup_ui()
+        self.setup_shortcuts()
+
+    # --- FUNGSI KONFIGURASI (PENGINGAT STATE) ---
+    def load_config(self):
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    data = json.load(f)
+                    self.last_folder = data.get("last_folder", "")
+                    self.last_script = data.get("last_script", "")
+            except Exception:
+                pass
+
+    def save_config(self):
+        try:
+            curr_script = self.script_var.get() if hasattr(self, 'script_var') else ""
+            with open(self.config_file, 'w') as f:
+                json.dump({
+                    "last_folder": self.last_folder, 
+                    "last_script": curr_script
+                }, f)
+        except Exception:
+            pass
+
+    def load_folder_to_memory(self, folder_path):
+        loaded_scripts = {}
+        try:
+            for filename in os.listdir(folder_path):
+                if filename.lower().endswith('.txt'):
+                    filepath = os.path.join(folder_path, filename)
+                    with open(filepath, 'r', encoding='utf-8') as file:
+                        content = file.read()
+                    title = os.path.splitext(filename)[0]
+                    loaded_scripts[title] = {"content": content.strip()}
+            if loaded_scripts:
+                self.scripts = loaded_scripts
+        except Exception:
+            pass
+
+    # --- ANTARMUKA PENGGUNA (UI) ---
+    def setup_ui(self):
+        self.control_frame = tk.Frame(self.root, bg="#333", padx=10, pady=10)
+        self.control_frame.pack(fill=tk.X, side=tk.TOP)
+
+        row1 = tk.Frame(self.control_frame, bg="#333")
+        row1.pack(fill=tk.X, pady=(0, 5))
+        
+        tk.Label(row1, text="Skrip:", bg="#333", fg="white").pack(side=tk.LEFT, padx=5)
+        self.script_var = tk.StringVar()
+        self.script_dropdown = ttk.Combobox(row1, textvariable=self.script_var, state="readonly", width=30)
+        self.script_dropdown.pack(side=tk.LEFT, padx=5)
+        self.update_dropdown()
+        self.script_dropdown.bind("<<ComboboxSelected>>", self.load_script)
+
+        tk.Button(row1, text="📂 Muat Folder", command=self.load_library).pack(side=tk.LEFT, padx=5)
+        tk.Button(row1, text="Sunting", command=self.edit_script).pack(side=tk.LEFT, padx=2)
+        tk.Button(row1, text="Hapus", command=self.delete_script).pack(side=tk.LEFT, padx=2)
+
+        tk.Button(row1, text="🖵 Layar Penuh", command=self.enter_fullscreen, bg="#555", fg="white").pack(side=tk.RIGHT, padx=5)
+
+        row2 = tk.Frame(self.control_frame, bg="#333")
+        row2.pack(fill=tk.X, pady=(5, 0))
+
+        self.btn_play = tk.Button(row2, text="▶ Play (Spasi)", command=self.toggle_play, bg="green", fg="white", width=12)
+        self.btn_play.pack(side=tk.LEFT, padx=5)
+
+        tk.Label(row2, text="Delay (dtk):", bg="#333", fg="white").pack(side=tk.LEFT, padx=(15, 2))
+        self.delay_var = tk.IntVar(value=3)
+        self.delay_spin = tk.Spinbox(row2, from_=1, to=60, textvariable=self.delay_var, width=5)
+        self.delay_spin.pack(side=tk.LEFT, padx=2)
+        tk.Button(row2, text="⏳ Mulai dg Delay", command=self.start_delay).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(row2, text="Reset Posisi", command=self.reset_scroll).pack(side=tk.LEFT, padx=20)
+
+        self.settings_frame = tk.Frame(self.root, bg="#444", padx=10, pady=5)
+        self.settings_frame.pack(fill=tk.X, side=tk.TOP)
+
+        tk.Label(self.settings_frame, text="Kecepatan:", bg="#444", fg="white").pack(side=tk.LEFT, padx=5)
+        tk.Button(self.settings_frame, text="-", command=lambda: self.change_speed(5)).pack(side=tk.LEFT)
+        self.lbl_speed = tk.Label(self.settings_frame, text=str(self.scroll_speed), bg="#444", fg="white")
+        self.lbl_speed.pack(side=tk.LEFT, padx=5)
+        tk.Button(self.settings_frame, text="+", command=lambda: self.change_speed(-5)).pack(side=tk.LEFT)
+
+        tk.Label(self.settings_frame, text=" | Ukuran:", bg="#444", fg="white").pack(side=tk.LEFT, padx=5)
+        tk.Button(self.settings_frame, text="-", command=lambda: self.change_font(-2)).pack(side=tk.LEFT)
+        tk.Button(self.settings_frame, text="+", command=lambda: self.change_font(2)).pack(side=tk.LEFT)
+
+        tk.Label(self.settings_frame, text=" | Margin X (↔):", bg="#444", fg="white").pack(side=tk.LEFT, padx=(10, 2))
+        tk.Button(self.settings_frame, text="-", command=lambda: self.change_margin_x(-20)).pack(side=tk.LEFT)
+        tk.Button(self.settings_frame, text="+", command=lambda: self.change_margin_x(20)).pack(side=tk.LEFT)
+
+        tk.Label(self.settings_frame, text=" | Margin Y (↕):", bg="#444", fg="white").pack(side=tk.LEFT, padx=(10, 2))
+        tk.Button(self.settings_frame, text="-", command=lambda: self.change_margin_y(-20)).pack(side=tk.LEFT)
+        tk.Button(self.settings_frame, text="+", command=lambda: self.change_margin_y(20)).pack(side=tk.LEFT)
+
+        tk.Button(self.settings_frame, text="Warna Teks", command=self.choose_color).pack(side=tk.LEFT, padx=15)
+
+        self.prompter_frame = tk.Frame(self.root, bg=self.bg_color)
+        self.prompter_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.text_area = tk.Text(
+            self.prompter_frame, font=("Helvetica", self.font_size, "bold"), 
+            bg=self.bg_color, fg=self.text_color, wrap=tk.WORD, 
+            padx=self.margin_x, pady=self.margin_y, relief=tk.FLAT, state=tk.DISABLED
+        )
+        self.text_area.pack(fill=tk.BOTH, expand=True)
+        
+        # Load skrip aktif
+        if self.scripts:
+            if self.last_script and self.last_script in self.scripts:
+                self.script_var.set(self.last_script)
+            else:
+                self.script_var.set(list(self.scripts.keys())[0])
+            self.load_script()
+
+    # --- PENGATURAN SHORTCUT ---
+    def setup_shortcuts(self):
+        self.root.bind("<space>", self.handle_space)
+        self.root.bind("<Escape>", self.exit_fullscreen)
+
+    def handle_space(self, event):
+        widget = event.widget
+        widget_class = widget.winfo_class()
+        if widget_class in ('Entry', 'TCombobox', 'Spinbox'): return
+        if widget_class == 'Text':
+            try:
+                if str(widget.cget('state')) == 'normal': return
+            except tk.TclError: pass
+        self.toggle_play()
+        return "break"
+
+    # --- FITUR LAYAR PENUH & DELAY ---
+    def enter_fullscreen(self):
+        self.is_fullscreen = True
+        self.root.attributes("-fullscreen", True)
+        self.control_frame.pack_forget()
+        self.settings_frame.pack_forget()
+        self.root.focus_set()
+
+    def exit_fullscreen(self, event=None):
+        if self.is_fullscreen:
+            self.is_fullscreen = False
+            self.root.attributes("-fullscreen", False)
+            self.control_frame.pack(fill=tk.X, side=tk.TOP, before=self.prompter_frame)
+            self.settings_frame.pack(fill=tk.X, side=tk.TOP, before=self.prompter_frame)
+            self.root.focus_set()
+
+    def start_delay(self):
+        self.root.focus_set()
+        try: delay_seconds = self.delay_var.get()
+        except tk.TclError: delay_seconds = 3
+
+        if delay_seconds > 0:
+            self.pause_prompter()
+            self.run_countdown(delay_seconds)
+        else:
+            self.toggle_play()
+
+    def run_countdown(self, seconds):
+        if seconds > 0:
+            if not hasattr(self, 'countdown_label'):
+                self.countdown_label = tk.Label(self.prompter_frame, text="", font=("Helvetica", 100, "bold"), fg="red", bg=self.bg_color)
+                self.countdown_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            self.countdown_label.config(text=str(seconds))
+            self.root.after(1000, self.run_countdown, seconds - 1)
+        else:
+            if hasattr(self, 'countdown_label'):
+                self.countdown_label.destroy()
+                del self.countdown_label
+            self.root.focus_set() 
+            if not self.is_playing: self.toggle_play()
+
+    # --- MANAJEMEN SKRIP ---
+    def load_script(self, event=None):
+        title = self.script_var.get()
+        if title in self.scripts:
+            self.pause_prompter()
+            script_data = self.scripts[title]
+            display_text = f"--- {title} ---\n\n{script_data['content']}\n\n[ AKHIR SKRIP ]"
+            
+            self.text_area.config(state=tk.NORMAL)
+            self.text_area.delete(1.0, tk.END)
+            self.text_area.insert(tk.END, display_text)
+            self.text_area.config(state=tk.DISABLED)
+            
+            self.text_area.tag_add("center", "1.0", "end")
+            self.text_area.tag_configure("center", justify="center")
+            self.reset_scroll()
+            self.root.focus_set()
+            self.save_config()
+
+    def load_library(self):
+        self.pause_prompter()
+        folder_path = filedialog.askdirectory(title="Pilih Folder Library Skrip")
+        if not folder_path: return
+            
+        self.load_folder_to_memory(folder_path)
+        if hasattr(self, 'scripts') and len(self.scripts) > 0:
+            self.update_dropdown()
+            first_script = list(self.scripts.keys())[0]
+            self.script_var.set(first_script)
+            self.load_script()
+            
+            self.last_folder = folder_path
+            self.save_config()
+            messagebox.showinfo("Sukses", f"Berhasil memuat skrip dari folder.")
+        else:
+            messagebox.showwarning("Folder Kosong", "Tidak ditemukan file berformat .txt di dalam folder tersebut.")
+        self.root.focus_set()
+
+    def edit_script(self):
+        title = self.script_var.get()
+        if title not in self.scripts: return
+        self.pause_prompter()
+        
+        edit_win = tk.Toplevel(self.root)
+        edit_win.title(f"Sunting Skrip: {title}")
+        edit_win.geometry("600x500")
+        
+        text_input = tk.Text(edit_win, wrap=tk.WORD, font=("Helvetica", 12))
+        text_input.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        text_input.insert(tk.END, self.scripts[title]['content'])
+        
+        def save_edit():
+            new_content = text_input.get(1.0, tk.END).strip()
+            if new_content:
+                self.scripts[title]['content'] = new_content
+                self.load_script()
+            edit_win.destroy()
+            
+        tk.Button(edit_win, text="Simpan (Memori Saja)", command=save_edit, bg="blue", fg="white").pack(pady=10)
+
+    def delete_script(self):
+        title = self.script_var.get()
+        if title not in self.scripts: return
+        self.pause_prompter()
+        
+        if messagebox.askyesno("Konfirmasi", f"Hapus skrip '{title}' dari memori list? (File asli tidak akan terhapus)"):
+            del self.scripts[title]
+            self.update_dropdown()
+            if self.scripts:
+                self.script_var.set(list(self.scripts.keys())[0])
+                self.load_script()
+            else:
+                self.script_var.set("")
+                self.text_area.config(state=tk.NORMAL)
+                self.text_area.delete(1.0, tk.END)
+                self.text_area.config(state=tk.DISABLED)
+                self.save_config()
+
+    def update_dropdown(self):
+        self.script_dropdown["values"] = list(self.scripts.keys())
+
+    # --- KONTROL PROMPTER ---
+    def pause_prompter(self):
+        if self.is_playing: self.toggle_play()
+
+    def toggle_play(self):
+        if not self.scripts or not self.script_var.get(): return
+        self.is_playing = not self.is_playing
+        if self.is_playing:
+            self.btn_play.config(text="⏸ Pause (Spasi)", bg="red")
+            self.auto_scroll()
+        else:
+            self.btn_play.config(text="▶ Play (Spasi)", bg="green")
+
+    def auto_scroll(self):
+        if self.is_playing:
+            self.text_area.yview_scroll(1, "pixels")
+            self.root.after(self.scroll_speed, self.auto_scroll)
+
+    def reset_scroll(self):
+        self.text_area.yview_moveto(0.0)
+
+    # --- PENGATURAN DINAMIS ---
+    def change_speed(self, delta):
+        if self.scroll_speed + delta > 0:
+            self.scroll_speed += delta
+            self.lbl_speed.config(text=str(self.scroll_speed))
+
+    def change_font(self, delta):
+        self.font_size = max(10, self.font_size + delta)
+        self.text_area.config(font=("Helvetica", self.font_size, "bold"))
+
+    def change_margin_x(self, delta):
+        self.margin_x = max(0, self.margin_x + delta)
+        self.text_area.config(padx=self.margin_x)
+
+    def change_margin_y(self, delta):
+        self.margin_y = max(0, self.margin_y + delta)
+        self.text_area.config(pady=self.margin_y)
+
+    def choose_color(self):
+        color = colorchooser.askcolor(title="Pilih Warna Teks")[1]
+        if color:
+            self.text_color = color
+            self.text_area.config(fg=self.text_color)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    # --- PENGGUNAAN NAMA CLASS BARU ---
+    app = EasePrompterApp(root)
+    root.mainloop()
